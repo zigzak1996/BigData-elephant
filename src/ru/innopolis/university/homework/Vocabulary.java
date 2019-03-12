@@ -77,6 +77,8 @@ public class Vocabulary {
 
         private final Set<Integer> uniqueIds = new HashSet<>();
 
+        private static final String OUTPUT_FORMAT = "%1$d\t%2$d";
+
         public void reduce(Text key, Iterable<IntWritable> values, Context context)
                 throws IOException, InterruptedException {
 
@@ -86,7 +88,7 @@ public class Vocabulary {
 
             Text result = new Text();
 
-            result.set(String.format("%1$d\t%2$d", index++, uniqueIds.size()));
+            result.set(String.format(OUTPUT_FORMAT, index++, uniqueIds.size()));
 
             context.write(key, result);
 
@@ -106,6 +108,8 @@ public class Vocabulary {
         job.setMapperClass(TokenizerMapper.class);
         job.setCombinerClass(Combiner.class);
         job.setReducerClass(IntSumReducer.class);
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(IntWritable.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(IntWritable.class);
         FileInputFormat.addInputPath(job, new Path(args[0] + MATCHED_WIKI_NAMES));
