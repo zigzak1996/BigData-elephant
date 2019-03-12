@@ -1,4 +1,3 @@
-
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IntWritable;
@@ -17,42 +16,28 @@ import java.util.StringTokenizer;
 
 public class Vocabulary {
 
-    public static class TokenizerMapper
-            extends Mapper<Object, Text, Text, IntWritable> {
+    public static class TokenizerMapper extends Mapper<Object, Text, Text, IntWritable> {
 
-//        private final static IntWritable one = new IntWritable(1);
+        private final IntWritable docId = new IntWritable();
 
-        private final static IntWritable docId = new IntWritable();
+        private final Text word = new Text();
 
-        private Text word = new Text();
+        public void map(Object key, Text value, Context context) throws IOException, InterruptedException {
 
-        public void map(Object key, Text value, Context context
-        ) throws IOException, InterruptedException {
             JSONObject json = new JSONObject(value.toString());
 
             docId.set(Integer.parseInt(json.getString("id")));
 
-            StringTokenizer itr = new StringTokenizer(json.getString("text"));
+            String text = json.getString("text").toLowerCase().replaceAll("[^a-z0-9\\s]", " ");
+
+            StringTokenizer itr = new StringTokenizer(text);
 
             while (itr.hasMoreTokens()) {
 
-                String now = itr.nextToken().toLowerCase();
+                String now = itr.nextToken();
 
-                String parseWord = "";
-
-                for (int i = 0; i < now.length(); i++) {
-
-                    if ((now.charAt(i) >= 'a' && now.charAt(i) <= 'z') || now.charAt(i) == '-') {
-
-                        parseWord += now.charAt(i);
-
-                    }
-                    else {
-                        continue;
-                    }
-                }
-                if (parseWord.length() > 0){
-                    word.set(parseWord);
+                if (now.length() > 0) {
+                    word.set(now);
                     context.write(word, docId);
                 }
 
@@ -61,25 +46,38 @@ public class Vocabulary {
         }
     }
 
-    public static class Combiner extends Reducer<Text, IntWritable, Text, IntWritable>
-    {
-        public void reduce(Text key,Iterable<IntWritable> value, Context context) throws IOException, InterruptedException
-        {
-            for (IntWritable v : value)
-                context.write(key,v);
+    public static class Combiner extends Reducer<Text, IntWritable, Text, IntWritable> {
+
+        private final IntWritable send = new IntWritable();
+
+        private final Set<Integer> uniqueIds = new HashSet<>();
+
+        public void reduce(Text key, Iterable<IntWritable> value, Context context)
+                throws IOException, InterruptedException {
+
+            for (IntWritable val : value) {
+                uniqueIds.add(val.get());
+            }
+
+            for (Integer val : uniqueIds) {
+                send.set(val);
+                context.write(key, send);
+            }
+
+            uniqueIds.clear();
         }
 
     }
 
-    public static class IntSumReducer
-            extends Reducer<Text, IntWritable,Text,Text> {
+    public static class IntSumReducer extends Reducer<Text, IntWritable, Text, Text> {
+
         private static int index = 0;
 
         private final Set<Integer> uniqueIds = new HashSet<>();
 
-        public void reduce(Text key, Iterable<IntWritable> values,
-                           Context context
-        ) throws IOException, InterruptedException {
+        public void reduce(Text key, Iterable<IntWritable> values, Context context)
+                throws IOException, InterruptedException {
+
             for (IntWritable val : values) {
                 uniqueIds.add(val.get());
             }
@@ -96,7 +94,7 @@ public class Vocabulary {
 
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
-        Job job = Job.getInstance(conf, "word count");
+        Job job = Job.getInstance(conf, "Vocabulary");
         job.setJarByClass(Vocabulary.class);
         job.setMapperClass(TokenizerMapper.class);
         job.setCombinerClass(Combiner.class);
