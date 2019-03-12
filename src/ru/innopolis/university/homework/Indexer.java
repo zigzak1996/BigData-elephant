@@ -66,7 +66,7 @@ public class Indexer {
 
             JSONObject json = new JSONObject(value.toString());
 
-            String text = json.getString("text").toLowerCase().replaceAll("[^a-z0-9\\s]", " ");
+            String text = Vocabulary.filterText(json.getString("text"));
 
             StringTokenizer itr = new StringTokenizer(text);
 
@@ -113,33 +113,18 @@ public class Indexer {
         }
     }
 
-    public static class Combiner extends Reducer<IntWritable, IntWritable, IntWritable, IntWritable> {
-
-        @Override
-        public void reduce(IntWritable docId, Iterable<IntWritable> wordIds, Context context)
-                throws IOException, InterruptedException {
-
-            for (IntWritable wordId : wordIds) {
-                context.write(docId, wordId);
-            }
-
-        }
-
-    }
-
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
         conf.set("path_to_vocabulary", args[0]);
         Job job = Job.getInstance(conf, "Indexer");
         job.setJarByClass(Indexer.class);
         job.setMapperClass(TFMapper.class);
-        job.setCombinerClass(Combiner.class);
         job.setReducerClass(TFReducer.class);
         job.setMapOutputKeyClass(IntWritable.class);
         job.setMapOutputValueClass(IntWritable.class);
         job.setOutputKeyClass(IntWritable.class);
         job.setOutputValueClass(Text.class);
-        FileInputFormat.addInputPath(job, new Path(args[1]));
+        FileInputFormat.addInputPath(job, new Path(args[1] + Vocabulary.MATCHED_WIKI_NAMES));
         FileOutputFormat.setOutputPath(job, new Path(args[2]));
         System.exit(job.waitForCompletion(true) ? 0 : 1);
     }

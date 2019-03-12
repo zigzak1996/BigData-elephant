@@ -16,6 +16,8 @@ import java.util.StringTokenizer;
 
 public class Vocabulary {
 
+    public static final String MATCHED_WIKI_NAMES = "/AA*";
+
     public static class TokenizerMapper extends Mapper<Object, Text, Text, IntWritable> {
 
         private final IntWritable docId = new IntWritable();
@@ -28,7 +30,7 @@ public class Vocabulary {
 
             docId.set(Integer.parseInt(json.getString("id")));
 
-            String text = json.getString("text").toLowerCase().replaceAll("[^a-z0-9\\s]", " ");
+            String text = filterText(json.getString("text"));
 
             StringTokenizer itr = new StringTokenizer(text);
 
@@ -92,6 +94,11 @@ public class Vocabulary {
         }
     }
 
+    static String filterText(final String rawText) {
+        return rawText.toLowerCase()
+                .replaceAll("[^a-z\\d\\s]", " ");
+    }
+
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
         Job job = Job.getInstance(conf, "Vocabulary");
@@ -101,7 +108,7 @@ public class Vocabulary {
         job.setReducerClass(IntSumReducer.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(IntWritable.class);
-        FileInputFormat.addInputPath(job, new Path(args[0]));
+        FileInputFormat.addInputPath(job, new Path(args[0] + MATCHED_WIKI_NAMES));
         FileOutputFormat.setOutputPath(job, new Path(args[1]));
         System.exit(job.waitForCompletion(true) ? 0 : 1);
     }
