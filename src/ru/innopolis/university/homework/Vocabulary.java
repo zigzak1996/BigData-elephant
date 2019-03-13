@@ -100,11 +100,12 @@ public class Vocabulary {
      * method for text processing with regular expression.
      *
      * @param rawText - text, which is going to be preprocessed and filtered by the regular expression.
-     * @return lowercase text which contains only Latin letters, digits and spaces.
+     * @return lowercase text without any punctuation and specific symbols, and without words consisted only from
+     * digits, and words where some letter or digit repeats at least 4 times.
      */
     static String filterText(final String rawText) {
         return rawText.toLowerCase()
-                .replaceAll("[^a-z\\d\\s]", " ");
+                .replaceAll("\\s*\\b(?=[a-z\\d]*([a-z\\d])\\1{3}|\\d+\\b)[a-z\\d]+|[^a-z\\d\\s]", " ");
     }
 
     /***
