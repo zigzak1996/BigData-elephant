@@ -14,6 +14,12 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.StringTokenizer;
 
+
+/***
+ * @TokenizerMapper is responsible for text extraction from json file by using its id.
+ * Afterwards it processes it by regular expression method filter and saves each word with appropriate id of a document.
+ * Finally it cleans dataset from empty places (ex. empty line)
+ */
 public class Vocabulary {
 
     public static final String MATCHED_WIKI_NAMES = "/AA*"; //Special prefix for taking only documents which starts with AA*.
@@ -48,22 +54,23 @@ public class Vocabulary {
         }
     }
 
+
     public static class Combiner extends Reducer<Text, IntWritable, Text, IntWritable> {
 
-        private final IntWritable send = new IntWritable();
+        private final IntWritable document_id = new IntWritable();
 
         private final Set<Integer> uniqueIds = new HashSet<>();
 
-        public void reduce(Text key, Iterable<IntWritable> value, Context context)
+        public void reduce(Text word, Iterable<IntWritable> document_ids, Context context)
                 throws IOException, InterruptedException {
 
-            for (IntWritable val : value) {
+            for (IntWritable val : document_ids) {
                 uniqueIds.add(val.get());
             }
 
             for (Integer val : uniqueIds) {
-                send.set(val);
-                context.write(key, send);
+                document_id.set(val);
+                context.write(word, document_id);
             }
 
             uniqueIds.clear();
@@ -71,28 +78,33 @@ public class Vocabulary {
 
     }
 
-    public static class IntSumReducer extends Reducer<Text, IntWritable, Text, Text> {
+    /***
+     * By using Combiner we are trying to decrase load on the Reducer by compressing repetitive words and doc ids
+     * to one word per document.
+     *
+     * @DocumentReducer obtains Combiner output and makes final assigning of words' Ids and IDFs accordingly
+     */
 
-        private static int index = 0;
+    public static class DocumentReducer extends Reducer<Text, IntWritable, Text, Text> {
 
-        private final Set<Integer> uniqueIds = new HashSet<>();
+        private static int wordId = 0;
 
-        private static final String OUTPUT_FORMAT = "%1$d\t%2$d";
+        private final Set<Integer> uniqueDocIds = new HashSet<>();
 
-        public void reduce(Text key, Iterable<IntWritable> values, Context context)
+        public void reduce(Text word, Iterable<IntWritable> document_id, Context context)
                 throws IOException, InterruptedException {
 
-            for (IntWritable val : values) {
-                uniqueIds.add(val.get());
+            for (IntWritable val : document_id) {
+                uniqueDocIds.add(val.get());
             }
 
             Text result = new Text();
 
-            result.set(String.format(OUTPUT_FORMAT, index++, uniqueIds.size()));
+            result.set(wordId++ +""+uniqueDocIds.size())
 
-            context.write(key, result);
+            context.write(word, result);
 
-            uniqueIds.clear();
+            uniqueDocIds.clear();
         }
     }
 
@@ -100,7 +112,7 @@ public class Vocabulary {
      * method for text processing with regular expression.
      *
      * @param rawText - text, which is going to be preprocessed and filtered by the regular expression.
-     * @return lowercase text without any punctuation and specific symbols, and without words consisted only from
+     * @return lowercase text without any punctuation and specific symbols, and without words that consist only
      * digits, and words where some letter or digit repeats at least 4 times.
      */
     static String filterText(final String rawText) {
