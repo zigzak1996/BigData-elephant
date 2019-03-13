@@ -1,4 +1,5 @@
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.DoubleWritable;
 import org.apache.hadoop.io.IntWritable;
@@ -10,61 +11,66 @@ import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 
 import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.StringTokenizer;
 
 
-public class OldQuery {
+public class Query {
 
-    public static Map<String, Integer> vocab = new HashMap<>();
-    public static Map<Integer, Double> query_map = new HashMap<>();
-    public static Map<Integer, Double> idf = new HashMap<>();
+    private static final Map<String, Integer> vocab = new HashMap<>();
+    private static final Map<Integer, Double> query_map = new HashMap<>();
+    private static final Map<Integer, Double> idf = new HashMap<>();
 
-    public static String query = "the good person";
+    private static String query = "the good person";
+
+    private static final int DEFAULT_RELEVANT_PAGE_COUNT = 10;
+
+    private static int relevancePagesCount = DEFAULT_RELEVANT_PAGE_COUNT;
+
+    private static void setArguments(final String rawPagesCount, final String rawQuery) {
+
+        if (rawPagesCount != null && !rawPagesCount.isEmpty()) {
+            try {
+                relevancePagesCount = Integer.parseInt(rawPagesCount);
+            } catch (NumberFormatException ex) {
+                relevancePagesCount = DEFAULT_RELEVANT_PAGE_COUNT;
+            }
+        }
+
+        if (rawQuery != null && !rawQuery.isEmpty()) {  // if specific query was entered - set it, otherwise use default
+            query = rawQuery;
+        }
+    }
 
     private static void translateRequest() {
-        StringTokenizer itr = new StringTokenizer(query);
+        StringTokenizer itr = new StringTokenizer(Vocabulary.filterText(query));
         while (itr.hasMoreTokens()) {
 
-            String now = itr.nextToken().toLowerCase();
+            String word = itr.nextToken();
 
-            String parseWord = "";
-
-            for (int i = 0; i < now.length(); i++) {
-
-                if ((now.charAt(i) >= 'a' && now.charAt(i) <= 'z') || now.charAt(i) == '-') {
-
-                    parseWord += now.charAt(i);
-
-                }
-            }
-            if (vocab.containsKey(parseWord)) {
-                if (query_map.containsKey(vocab.get(parseWord))) {
-                    double tmp = query_map.get(vocab.get(parseWord)) + 1.0;
-                    query_map.put(vocab.get(parseWord), tmp);
-                } else {
-                    query_map.put(vocab.get(parseWord), 1.0);
-                }
+            if (vocab.containsKey(word)) {  //map - word_id: it's count in query
+                query_map.merge(vocab.get(word), 1.0, Double::sum);
             }
         }
     }
 
-    public static void createVocabluary() {
-        BufferedReader bf;
-        try {
-            bf = new BufferedReader(new FileReader("/home/zaraza/vocabulary/vocabulary"));
-            String line = bf.readLine();
+    private static void createVocabularyAndIdf(final String wayToVoc) throws IOException {
+        Path pathToVoc = new Path(wayToVoc);
+        FileSystem fileSystem = FileSystem.get(new Configuration());
 
+        try (BufferedReader bf = new BufferedReader(new InputStreamReader(fileSystem.open(pathToVoc)))) {
+
+            String line = bf.readLine();
             while (line != null) {
                 StringTokenizer itr = new StringTokenizer(line);
-                String key = itr.nextToken();
-                Integer wordId = Integer.parseInt(itr.nextToken());
+                String word = itr.nextToken();
+                int wordId = Integer.parseInt(itr.nextToken());
                 double wordIdf = Double.parseDouble(itr.nextToken());
 
-                vocab.putIfAbsent(key, wordId);
+                vocab.putIfAbsent(word, wordId);
                 idf.putIfAbsent(wordId, wordIdf);
 
                 line = bf.readLine();
@@ -75,8 +81,7 @@ public class OldQuery {
 
     }
 
-
-    public static class TokenizerMapper
+    public static class FrequencyMapper
             extends Mapper<Object, Text, IntWritable, DoubleWritable> {
 
         public void map(Object key, Text value, Context context
@@ -84,14 +89,19 @@ public class OldQuery {
 
             StringTokenizer itr = new StringTokenizer(value.toString());
 
-            Integer doc_id = Integer.parseInt(itr.nextToken());
-            Integer word_id = Integer.parseInt(itr.nextToken());
-            Double frequency = Double.parseDouble(itr.nextToken());
+            int doc_id = Integer.parseInt(itr.nextToken());
+            int word_id = Integer.parseInt(itr.nextToken());
+            double doc_tf = Double.parseDouble(itr.nextToken());
+            Configuration conf = context.getConfiguration();
+            String raw_query_tf = conf.get(String.valueOf(word_id), "");  // извлечение TF по Query wordId
+            String raw_idf = conf.get(word_id + "C", "");   // извлечение Idf по WordID + C
+            if (!raw_query_tf.isEmpty() && !raw_idf.isEmpty()) {
+                double query_tf = Double.parseDouble(raw_query_tf);
+                double query_idf = Double.parseDouble(raw_idf);
 
-            if (query_map.containsKey(word_id)) {
-                double first = frequency / idf.get(word_id);
-                double second = query_map.get(word_id) / idf.get(word_id);
-                context.write(new IntWritable(doc_id), new DoubleWritable(first * second));
+                double doc_tf_idf = doc_tf / query_idf;
+                double query_tf_idf = query_tf / query_idf;
+                context.write(new IntWritable(doc_id), new DoubleWritable(doc_tf_idf * query_tf_idf));
             }
         }
     }
@@ -99,8 +109,9 @@ public class OldQuery {
     public static class IntSumReducer
             extends Reducer<IntWritable, DoubleWritable, Text, DoubleWritable> {
 
-        DoubleWritable result = new DoubleWritable();
-        Text word = new Text();
+        final DoubleWritable result = new DoubleWritable();
+
+        final Text word = new Text();
 
         public void reduce(IntWritable key, Iterable<DoubleWritable> value, Context context)
                 throws IOException, InterruptedException {
@@ -112,51 +123,58 @@ public class OldQuery {
             }
 
             result.set(sum);
-            word.set("DocID:" + key.get());
+            word.set(key.get() + "");
             context.write(word, result);
 
         }
     }
 
-    public static class Combiner
+    public static class IntSumCombiner
             extends Reducer<IntWritable, DoubleWritable, IntWritable, DoubleWritable> {
-        DoubleWritable result = new DoubleWritable();
 
-        public void reduce(IntWritable key, Iterable<DoubleWritable> value, Context context)
+        final DoubleWritable result = new DoubleWritable();
+
+        public void reduce(IntWritable doc_id, Iterable<DoubleWritable> value, Context context)
                 throws IOException, InterruptedException {
             double sum = 0;
             for (DoubleWritable val : value) {
                 sum += val.get();
             }
             result.set(sum);
-            context.write(key, result);
-
+            context.write(doc_id, result);
         }
 
     }
 
     public static void main(String[] args) throws Exception {
-        createVocabluary();
+        final Configuration conf = new Configuration();
+
+        setArguments(args[4], args[5]);
+        createVocabularyAndIdf(args[0]);
         translateRequest();
 
-//        for (int key : query_map.keySet()) {
-//            System.out.println(key);
-//            System.out.println(query_map.get(key));
-//        }
+        query_map.forEach((wordId, countInQuery) -> {
+            conf.set(wordId.toString(), countInQuery.toString());
+            conf.set(wordId.toString() + "C", idf.get(wordId).toString());
+        });
 
-        Configuration conf = new Configuration();
-        Job job = Job.getInstance(conf, "Query");
-        job.setJarByClass(OldQuery.class);
-        job.setMapperClass(TokenizerMapper.class);
-        job.setCombinerClass(Combiner.class);
-        job.setReducerClass(IntSumReducer.class);
-        job.setMapOutputKeyClass(IntWritable.class);
-        job.setMapOutputValueClass(DoubleWritable.class);
-        job.setOutputKeyClass(Text.class);
-        job.setOutputValueClass(DoubleWritable.class);
-        FileInputFormat.addInputPath(job, new Path(args[0]));
-        FileOutputFormat.setOutputPath(job, new Path(args[1]));
-        System.exit(job.waitForCompletion(true) ? 0 : 1);
+        conf.setInt("$size$", relevancePagesCount);
+        conf.set("$path_to_parse$", args[3]);
+        Job processQueryJob = Job.getInstance(conf, "Query");
+        processQueryJob.setJarByClass(Query.class);
+        processQueryJob.setMapperClass(FrequencyMapper.class);
+        processQueryJob.setCombinerClass(IntSumCombiner.class);
+        processQueryJob.setReducerClass(IntSumReducer.class);
+
+        processQueryJob.setMapOutputKeyClass(IntWritable.class);
+        processQueryJob.setMapOutputValueClass(DoubleWritable.class);
+        processQueryJob.setOutputKeyClass(Text.class);
+        processQueryJob.setOutputValueClass(DoubleWritable.class);
+        FileInputFormat.addInputPath(processQueryJob, new Path(args[1]));
+        FileOutputFormat.setOutputPath(processQueryJob, new Path(args[2]));
+
+        System.exit(processQueryJob.waitForCompletion(true) ? 0 : 1);
 
     }
+
 }
