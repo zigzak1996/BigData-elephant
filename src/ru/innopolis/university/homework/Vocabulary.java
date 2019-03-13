@@ -16,6 +16,8 @@ import java.util.StringTokenizer;
 
 public class Vocabulary {
 
+    public static final String MATCHED_WIKI_NAMES = "/AA*"; //Special prefix for taking only documents which starts with AA*.
+
     public static class TokenizerMapper extends Mapper<Object, Text, Text, IntWritable> {
 
         private final IntWritable docId = new IntWritable();
@@ -28,7 +30,7 @@ public class Vocabulary {
 
             docId.set(Integer.parseInt(json.getString("id")));
 
-            String text = json.getString("text").toLowerCase().replaceAll("[^a-z0-9\\s]", " ");
+            String text = filterText(json.getString("text"));
 
             StringTokenizer itr = new StringTokenizer(text);
 
@@ -75,6 +77,8 @@ public class Vocabulary {
 
         private final Set<Integer> uniqueIds = new HashSet<>();
 
+        private static final String OUTPUT_FORMAT = "%1$d\t%2$d";
+
         public void reduce(Text key, Iterable<IntWritable> values, Context context)
                 throws IOException, InterruptedException {
 
@@ -84,7 +88,7 @@ public class Vocabulary {
 
             Text result = new Text();
 
-            result.set(String.format("%1$d\t%2$d", index++, uniqueIds.size()));
+            result.set(String.format(OUTPUT_FORMAT, index++, uniqueIds.size()));
 
             context.write(key, result);
 
@@ -92,6 +96,26 @@ public class Vocabulary {
         }
     }
 
+    /***
+     * method for text processing with regular expression.
+     *
+     * @param rawText - text, which is going to be preprocessed and filtered by the regular expression.
+     * @return lowercase text which contains only Latin letters, digits and spaces.
+     */
+    static String filterText(final String rawText) {
+        return rawText.toLowerCase()
+                .replaceAll("[^a-z\\d\\s]", " ");
+    }
+
+    /***
+     * Method, which starts job by vocabulary creation, and after successful finishing of the job,
+     * starts job by saving documents' information (id, title, URL) into the separate file. {@link ParseDocument}
+     *
+     * @param args: String array with arguments:
+     *                  args[0] - Path to documents, which we are going to parse.
+     *                  args[1] - Path into which vocabulary will be saved.
+     *                  args[2] - Path into which documents' information will be saved.
+     */
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
         Job job = Job.getInstance(conf, "Vocabulary");
@@ -99,10 +123,20 @@ public class Vocabulary {
         job.setMapperClass(TokenizerMapper.class);
         job.setCombinerClass(Combiner.class);
         job.setReducerClass(IntSumReducer.class);
+        job.setMapOutputKeyClass(Text.class);
+        job.setMapOutputValueClass(IntWritable.class);
         job.setOutputKeyClass(Text.class);
         job.setOutputValueClass(IntWritable.class);
-        FileInputFormat.addInputPath(job, new Path(args[0]));
+        FileInputFormat.addInputPath(job, new Path(args[0] + MATCHED_WIKI_NAMES));
         FileOutputFormat.setOutputPath(job, new Path(args[1]));
-        System.exit(job.waitForCompletion(true) ? 0 : 1);
+
+        boolean isSuccess = job.waitForCompletion(true); // is previous job finished successfully?
+
+        if (isSuccess) {
+            ParseDocument.startParsingDocuments(conf, args[0], args[2]); // Starting saving title, url, ids from docs.
+        } else {
+            System.exit(1); //UnSuccess closing
+        }
+
     }
 }
