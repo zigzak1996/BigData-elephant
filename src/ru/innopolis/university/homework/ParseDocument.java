@@ -58,7 +58,7 @@ class ParseDocument {
                 throws IOException, InterruptedException {
 
             for (Text docInfo : docInfos) {
-                context.write(docInfo, docInfo);
+                context.write(docId, docInfo);
             }
 
         }

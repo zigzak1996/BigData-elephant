@@ -100,7 +100,7 @@ public class Vocabulary {
 
             Text result = new Text();
 
-            result.set(wordId++ +""+uniqueDocIds.size())
+            result.set(wordId++ +" "+uniqueDocIds.size());
 
             context.write(word, result);
 
@@ -135,7 +135,7 @@ public class Vocabulary {
         job.setJarByClass(Vocabulary.class);
         job.setMapperClass(TokenizerMapper.class);
         job.setCombinerClass(Combiner.class);
-        job.setReducerClass(IntSumReducer.class);
+        job.setReducerClass(DocumentReducer.class);
         job.setMapOutputKeyClass(Text.class);
         job.setMapOutputValueClass(IntWritable.class);
         job.setOutputKeyClass(Text.class);
