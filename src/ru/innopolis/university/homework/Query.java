@@ -75,8 +75,19 @@ public class Query {
 
                 line = bf.readLine();
             }
-        } catch (IOException e) {
-            e.printStackTrace();
+        } catch (IOException ex) {
+            System.out.println("Error reading vocabulary file!");
+            ex.printStackTrace();
+        }
+    }
+
+    public static class DoubleInverseComparator extends DoubleWritable.Comparator {
+
+        @Override
+        public int compare(byte[] b1, int s1, int l1, byte[] b2, int s2, int l2) {
+            double thisValue = readDouble(b1, s1);
+            double thatValue = readDouble(b2, s2);
+            return -Double.compare(thisValue, thatValue);
         }
 
     }
@@ -146,6 +157,93 @@ public class Query {
 
     }
 
+    private static class OrderingMapper extends Mapper<Object, Text, DoubleWritable, Text> {
+
+        public void map(Object key, Text value, Context context
+        ) throws IOException, InterruptedException {
+            StringTokenizer itr = new StringTokenizer(value.toString());
+            String docId = itr.nextToken();
+            double relevance = Double.parseDouble(itr.nextToken());
+            context.write(new DoubleWritable(relevance), new Text(docId));
+        }
+    }
+
+    public static class OrderingCombiner extends Reducer<DoubleWritable, Text, DoubleWritable, Text> {
+
+        public void reduce(DoubleWritable key, Iterable<Text> value, Context context)
+                throws IOException, InterruptedException {
+            for (Text v : value)
+                context.write(key, v);
+        }
+
+    }
+
+    public static class OrderingReducer
+            extends Reducer<DoubleWritable, Text, Text, Text> {
+
+
+        private final Map<Integer, String> http = new HashMap<>();
+        private final Map<Integer, String> titles = new HashMap<>();
+
+        private static final Text keyOUT = new Text();
+        private static final Text valueOUT = new Text();
+
+        private static int count = 0;
+
+        @Override
+        protected void setup(Context context) throws IOException, InterruptedException {
+            super.setup(context);
+            Configuration conf = context.getConfiguration();
+            String path_to_doc_id_matcher = conf.get("$path_to_parse$");
+
+            Path pathToDocMatcher = new Path(path_to_doc_id_matcher);
+            FileSystem fileSystem = FileSystem.get(new Configuration());
+
+            try (BufferedReader bf = new BufferedReader(new InputStreamReader(fileSystem.open(pathToDocMatcher)))) {
+                String line = bf.readLine();
+                while (line != null) {
+                    StringTokenizer itr = new StringTokenizer(line);
+                    Integer docId = Integer.parseInt(itr.nextToken());
+                    String url = itr.nextToken();
+                    StringBuilder title = new StringBuilder();
+                    while (itr.hasMoreTokens()) {
+                        title.append(itr.nextToken()).append(" ");
+                    }
+
+                    http.putIfAbsent(docId, url);
+                    titles.putIfAbsent(docId, String.valueOf(title));
+
+                    line = bf.readLine();
+                }
+
+            } catch (IOException ex) {
+                System.out.println("Error reading file!");
+                ex.printStackTrace();
+            }
+
+        }
+
+        public void reduce(DoubleWritable relevance, Iterable<Text> value, Context context)
+                throws IOException, InterruptedException {
+            Configuration conf = context.getConfiguration();
+            int pages = conf.getInt("$size$", 10);
+            for (Text text : value) {
+                if (count > pages) {
+                    break;
+                }
+                count++;
+
+                keyOUT.set(titles.get(Integer.parseInt(text.toString())));
+                valueOUT.set(http.get(Integer.parseInt(text.toString())));
+
+
+                context.write(keyOUT, valueOUT);
+            }
+
+        }
+
+    }
+
     public static void main(String[] args) throws Exception {
         final Configuration conf = new Configuration();
 
@@ -173,8 +271,26 @@ public class Query {
         FileInputFormat.addInputPath(processQueryJob, new Path(args[1]));
         FileOutputFormat.setOutputPath(processQueryJob, new Path(args[2]));
 
-        System.exit(processQueryJob.waitForCompletion(true) ? 0 : 1);
+        boolean isSuccess = processQueryJob.waitForCompletion(true);
+        if (isSuccess) {
+            Job orderingJob = Job.getInstance(conf, "Sorting");
+            orderingJob.setJarByClass(Query.class);
+            orderingJob.setSortComparatorClass(DoubleInverseComparator.class);
+            orderingJob.setMapperClass(OrderingMapper.class);
+            orderingJob.setCombinerClass(OrderingCombiner.class);
+            orderingJob.setReducerClass(OrderingReducer.class);
 
+            orderingJob.setMapOutputKeyClass(DoubleWritable.class);
+            orderingJob.setMapOutputValueClass(Text.class);
+            orderingJob.setOutputKeyClass(Text.class);
+            orderingJob.setOutputValueClass(DoubleWritable.class);
+
+            FileInputFormat.addInputPath(orderingJob, new Path(args[2]));
+            FileOutputFormat.setOutputPath(orderingJob, new Path(args[2] + "/sorted"));
+            System.exit(orderingJob.waitForCompletion(true) ? 0 : 1);
+        } else {
+            System.exit(1); //UnSuccess closing
+        }
     }
 
 }
