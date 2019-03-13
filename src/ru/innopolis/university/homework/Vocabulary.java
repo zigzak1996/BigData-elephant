@@ -16,7 +16,7 @@ import java.util.StringTokenizer;
 
 public class Vocabulary {
 
-    public static final String MATCHED_WIKI_NAMES = "/AA*";
+    public static final String MATCHED_WIKI_NAMES = "/AA*"; //Special prefix for taking only documents which starts with AA*.
 
     public static class TokenizerMapper extends Mapper<Object, Text, Text, IntWritable> {
 
@@ -96,11 +96,26 @@ public class Vocabulary {
         }
     }
 
+    /***
+     * method for text processing with regular expression.
+     *
+     * @param rawText - text, which is going to be preprocessed and filtered by the regular expression.
+     * @return lowercase text which contains only Latin letters, digits and spaces.
+     */
     static String filterText(final String rawText) {
         return rawText.toLowerCase()
                 .replaceAll("[^a-z\\d\\s]", " ");
     }
 
+    /***
+     * Method, which starts job by vocabulary creation, and after successful finishing of the job,
+     * starts job by saving documents' information (id, title, URL) into the separate file. {@link ParseDocument}
+     *
+     * @param args: String array with arguments:
+     *                  args[0] - Path to documents, which we are going to parse.
+     *                  args[1] - Path into which vocabulary will be saved.
+     *                  args[2] - Path into which documents' information will be saved.
+     */
     public static void main(String[] args) throws Exception {
         Configuration conf = new Configuration();
         Job job = Job.getInstance(conf, "Vocabulary");
@@ -115,7 +130,7 @@ public class Vocabulary {
         FileInputFormat.addInputPath(job, new Path(args[0] + MATCHED_WIKI_NAMES));
         FileOutputFormat.setOutputPath(job, new Path(args[1]));
 
-        boolean isSuccess = job.waitForCompletion(true);
+        boolean isSuccess = job.waitForCompletion(true); // is previous job finished successfully?
 
         if (isSuccess) {
             ParseDocument.startParsingDocuments(conf, args[0], args[2]); // Starting saving title, url, ids from docs.
